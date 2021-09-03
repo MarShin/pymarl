@@ -27,7 +27,9 @@ class QLearner:
             self.params += list(self.mixer.parameters())
             self.target_mixer = copy.deepcopy(self.mixer)
 
-        self.optimiser = RMSprop(params=self.params, lr=args.lr, alpha=args.optim_alpha, eps=args.optim_eps)
+        self.optimiser = RMSprop(
+            params=self.params, lr=args.lr, alpha=args.optim_alpha, eps=args.optim_eps
+        )
 
         # a little wasteful to deepcopy (e.g. duplicates action selector), but should work for any MAC
         self.target_mac = copy.deepcopy(mac)
@@ -36,6 +38,7 @@ class QLearner:
 
     def train(self, batch: EpisodeBatch, t_env: int, episode_num: int):
         # Get the relevant quantities
+        # Skipping the last item coz batch comes with +1 more step than the env episode_limit
         rewards = batch["reward"][:, :-1]
         actions = batch["actions"][:, :-1]
         terminated = batch["terminated"][:, :-1].float()
@@ -52,7 +55,10 @@ class QLearner:
         mac_out = th.stack(mac_out, dim=1)  # Concat over time
 
         # Pick the Q-Values for the actions taken by each agent
-        chosen_action_qvals = th.gather(mac_out[:, :-1], dim=3, index=actions).squeeze(3)  # Remove the last dim
+        # dim=3 coz its (batch size, time step, # agents, # actions)
+        chosen_action_qvals = th.gather(mac_out[:, :-1], dim=3, index=actions).squeeze(
+            3
+        )  # Remove the last dim
 
         # Calculate the Q-Values necessary for the target
         target_mac_out = []
@@ -79,14 +85,18 @@ class QLearner:
 
         # Mix
         if self.mixer is not None:
-            chosen_action_qvals = self.mixer(chosen_action_qvals, batch["state"][:, :-1])
-            target_max_qvals = self.target_mixer(target_max_qvals, batch["state"][:, 1:])
+            chosen_action_qvals = self.mixer(
+                chosen_action_qvals, batch["state"][:, :-1]
+            )
+            target_max_qvals = self.target_mixer(
+                target_max_qvals, batch["state"][:, 1:]
+            )
 
         # Calculate 1-step Q-Learning targets
         targets = rewards + self.args.gamma * (1 - terminated) * target_max_qvals
 
         # Td-error
-        td_error = (chosen_action_qvals - targets.detach())
+        td_error = chosen_action_qvals - targets.detach()
 
         mask = mask.expand_as(td_error)
 
@@ -102,7 +112,9 @@ class QLearner:
         grad_norm = th.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
         self.optimiser.step()
 
-        if (episode_num - self.last_target_update_episode) / self.args.target_update_interval >= 1.0:
+        if (
+            episode_num - self.last_target_update_episode
+        ) / self.args.target_update_interval >= 1.0:
             self._update_targets()
             self.last_target_update_episode = episode_num
 
@@ -110,9 +122,20 @@ class QLearner:
             self.logger.log_stat("loss", loss.item(), t_env)
             self.logger.log_stat("grad_norm", grad_norm, t_env)
             mask_elems = mask.sum().item()
-            self.logger.log_stat("td_error_abs", (masked_td_error.abs().sum().item()/mask_elems), t_env)
-            self.logger.log_stat("q_taken_mean", (chosen_action_qvals * mask).sum().item()/(mask_elems * self.args.n_agents), t_env)
-            self.logger.log_stat("target_mean", (targets * mask).sum().item()/(mask_elems * self.args.n_agents), t_env)
+            self.logger.log_stat(
+                "td_error_abs", (masked_td_error.abs().sum().item() / mask_elems), t_env
+            )
+            self.logger.log_stat(
+                "q_taken_mean",
+                (chosen_action_qvals * mask).sum().item()
+                / (mask_elems * self.args.n_agents),
+                t_env,
+            )
+            self.logger.log_stat(
+                "target_mean",
+                (targets * mask).sum().item() / (mask_elems * self.args.n_agents),
+                t_env,
+            )
             self.log_stats_t = t_env
 
     def _update_targets(self):
@@ -139,5 +162,12 @@ class QLearner:
         # Not quite right but I don't want to save target networks
         self.target_mac.load_models(path)
         if self.mixer is not None:
-            self.mixer.load_state_dict(th.load("{}/mixer.th".format(path), map_location=lambda storage, loc: storage))
-        self.optimiser.load_state_dict(th.load("{}/opt.th".format(path), map_location=lambda storage, loc: storage))
+            self.mixer.load_state_dict(
+                th.load(
+                    "{}/mixer.th".format(path),
+                    map_location=lambda storage, loc: storage,
+                )
+            )
+        self.optimiser.load_state_dict(
+            th.load("{}/opt.th".format(path), map_location=lambda storage, loc: storage)
+        )
