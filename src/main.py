@@ -10,10 +10,13 @@ import sys
 import torch as th
 from utils.logging import get_logger
 import yaml
+import wandb
 
 from run import run
 
-SETTINGS['CAPTURE_MODE'] = "fd" # set to "no" if you want to see stdout/stderr in console
+SETTINGS[
+    "CAPTURE_MODE"
+] = "fd"  # set to "no" if you want to see stdout/stderr in console
 logger = get_logger()
 
 ex = Experiment("pymarl")
@@ -29,10 +32,25 @@ def my_main(_run, _config, _log):
     config = config_copy(_config)
     np.random.seed(config["seed"])
     th.manual_seed(config["seed"])
-    config['env_args']['seed'] = config["seed"]
+    config["env_args"]["seed"] = config["seed"]
+
+    # init wandb
+    project = wandb.init(
+        config=config,
+        project="StarCraft2",
+        name=config["name"],
+        group=config["env_args"]["map_name"],
+        job_type="training",
+        # reinit=True
+    )
 
     # run the framework
     run(_run, config, _log)
+
+    project.finish()
+
+    # Making sure framework really exits
+    os._exit(os.EX_OK)
 
 
 def _get_config(params, arg_name, subfolder):
@@ -44,7 +62,15 @@ def _get_config(params, arg_name, subfolder):
             break
 
     if config_name is not None:
-        with open(os.path.join(os.path.dirname(__file__), "config", subfolder, "{}.yaml".format(config_name)), "r") as f:
+        with open(
+            os.path.join(
+                os.path.dirname(__file__),
+                "config",
+                subfolder,
+                "{}.yaml".format(config_name),
+            ),
+            "r",
+        ) as f:
             try:
                 config_dict = yaml.load(f)
             except yaml.YAMLError as exc:
@@ -70,11 +96,13 @@ def config_copy(config):
         return deepcopy(config)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     params = deepcopy(sys.argv)
 
     # Get the defaults from default.yaml
-    with open(os.path.join(os.path.dirname(__file__), "config", "default.yaml"), "r") as f:
+    with open(
+        os.path.join(os.path.dirname(__file__), "config", "default.yaml"), "r"
+    ) as f:
         try:
             config_dict = yaml.load(f)
         except yaml.YAMLError as exc:
@@ -96,4 +124,3 @@ if __name__ == '__main__':
     ex.observers.append(FileStorageObserver.create(file_obs_path))
 
     ex.run_commandline(params)
-

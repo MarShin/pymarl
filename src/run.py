@@ -46,6 +46,8 @@ def run(_run, _config, _log):
     # sacred is on by default
     logger.setup_sacred(_run)
 
+    logger.setup_wandb()
+
     # Run and train
     run_sequential(args=args, logger=logger)
 
@@ -60,9 +62,6 @@ def run(_run, _config, _log):
             print("Thread joined")
 
     print("Exiting script")
-
-    # Making sure framework really exits
-    os._exit(os.EX_OK)
 
 
 def evaluate_sequential(args, runner):
